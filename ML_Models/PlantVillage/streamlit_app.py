@@ -15,7 +15,6 @@ Features:
 
 import time
 import os
-import io
 
 import streamlit as st
 import torch
@@ -166,7 +165,7 @@ def predict_and_explain(pil_image, model, class_names, scaler):
 
 # --- Page config ---
 st.set_page_config(
-    page_title="Plant Disease Detector - SIH",
+    page_title="Plant Disease Detector",
     page_icon="🌿",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -175,55 +174,201 @@ st.set_page_config(
 # --- Custom CSS (includes severity card styling) ---
 st.markdown("""
 <style>
+    :root {
+        --bg: #07070b;
+        --panel: #0f0f16;
+        --panel-2: #141420;
+        --text: #f2f2ff;
+        --muted: #b9b9d6;
+        --border: rgba(255, 43, 214, 0.22);
+        --magenta: #ff2bd6;
+        --magenta-2: #b100ff;
+        --success: #2ef2b2;
+        --warning: #ffcc00;
+        --danger: #ff4d6d;
+        --shadow: 0 10px 30px rgba(0,0,0,0.55);
+    }
+
+    html, body, [data-testid="stAppViewContainer"] {
+        background: radial-gradient(1200px 600px at 20% 0%, rgba(255, 43, 214, 0.12), transparent 60%),
+                    radial-gradient(900px 500px at 100% 10%, rgba(177, 0, 255, 0.10), transparent 55%),
+                    var(--bg) !important;
+        color: var(--text) !important;
+    }
+
+    /* Main content + sidebar panels */
+    [data-testid="stAppViewContainer"] > .main,
+    [data-testid="stSidebar"] {
+        background: transparent !important;
+        color: var(--text) !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stSidebarContent"] {
+        background: linear-gradient(180deg, rgba(255, 43, 214, 0.06), transparent 28%),
+                    var(--panel) !important;
+        border-right: 1px solid var(--border);
+    }
+
+    /* Typography */
+    h1, h2, h3, h4, h5, h6, p, li, label, span, div {
+        color: var(--text);
+    }
+    .stMarkdown, .stText, .stCaption {
+        color: var(--text);
+    }
+    .stCaption, .perf-badge {
+        color: var(--muted) !important;
+    }
+
+    /* Buttons */
+    .stButton > button {
+        border: 1px solid rgba(255, 43, 214, 0.55) !important;
+        background: linear-gradient(135deg, rgba(255, 43, 214, 0.25), rgba(177, 0, 255, 0.18)) !important;
+        color: var(--text) !important;
+        box-shadow: 0 0 0 rgba(255, 43, 214, 0.0);
+        transition: box-shadow 120ms ease, transform 120ms ease, border-color 120ms ease;
+    }
+    .stButton > button:hover {
+        border-color: rgba(255, 43, 214, 0.90) !important;
+        box-shadow: 0 0 0 3px rgba(255, 43, 214, 0.20), 0 0 22px rgba(255, 43, 214, 0.28);
+        transform: translateY(-1px);
+    }
+
+    /* Inputs */
+    [data-testid="stFileUploaderDropzone"],
+    [data-testid="stFileUploaderDropzone"] > div,
+    .stTextInput input, .stTextArea textarea, .stSelectbox div, .stMultiSelect div {
+        background: var(--panel) !important;
+        color: var(--text) !important;
+        border: 1px solid rgba(255, 43, 214, 0.22) !important;
+        border-radius: 10px !important;
+    }
+
+    /* Expanders */
+    [data-testid="stExpander"] {
+        background: var(--panel) !important;
+        border: 1px solid rgba(255, 43, 214, 0.18) !important;
+        border-radius: 12px !important;
+        box-shadow: var(--shadow);
+    }
+    [data-testid="stExpander"] summary {
+        color: var(--text) !important;
+    }
+
+    /* Progress bar */
+    [data-testid="stProgress"] > div > div > div {
+        background: linear-gradient(90deg, var(--magenta), var(--magenta-2)) !important;
+        box-shadow: 0 0 18px rgba(255, 43, 214, 0.25);
+    }
+    [data-testid="stProgress"] > div > div {
+        background: rgba(255, 255, 255, 0.10) !important;
+    }
+
+    /* Streamlit status boxes */
+    [data-testid="stAlert"] {
+        border-radius: 12px !important;
+        border: 1px solid rgba(255, 43, 214, 0.18) !important;
+        background: rgba(15, 15, 22, 0.9) !important;
+        box-shadow: var(--shadow);
+    }
+    [data-testid="stAlert"] * {
+        color: var(--text) !important;
+    }
+
     .main-header {
         font-size: 2.5rem;
         font-weight: bold;
-        color: #2E7D32;
+        color: var(--magenta);
         text-align: center;
         margin-bottom: 0.5rem;
+        text-shadow: 0 0 18px rgba(255, 43, 214, 0.25);
     }
     .sub-header {
         text-align: center;
-        color: #666;
+        color: var(--muted);
         margin-bottom: 2rem;
     }
     .result-card {
-        background-color: #E8F5E9;
-        border-left: 5px solid #4CAF50;
+        background: linear-gradient(180deg, rgba(255, 43, 214, 0.08), rgba(15, 15, 22, 0.95));
+        border: 1px solid rgba(255, 43, 214, 0.22);
+        border-left: 5px solid var(--magenta);
         padding: 1rem;
-        border-radius: 5px;
+        border-radius: 12px;
         margin: 1rem 0;
+        box-shadow: var(--shadow);
     }
     .treatment-card {
-        background-color: #FFF3E0;
-        border-left: 5px solid #FF9800;
+        background: linear-gradient(180deg, rgba(255, 204, 0, 0.10), rgba(15, 15, 22, 0.95));
+        border: 1px solid rgba(255, 43, 214, 0.18);
+        border-left: 5px solid var(--warning);
         padding: 1rem;
-        border-radius: 5px;
+        border-radius: 12px;
         margin: 1rem 0;
+        box-shadow: var(--shadow);
     }
     .pesticide-card {
-        background-color: #E3F2FD;
-        border-left: 5px solid #2196F3;
+        background: linear-gradient(180deg, rgba(46, 242, 178, 0.08), rgba(15, 15, 22, 0.95));
+        border: 1px solid rgba(255, 43, 214, 0.18);
+        border-left: 5px solid var(--success);
         padding: 1rem;
-        border-radius: 5px;
+        border-radius: 12px;
         margin: 1rem 0;
+        box-shadow: var(--shadow);
     }
     .severity-card {
         padding: 1rem;
-        border-radius: 5px;
+        border-radius: 12px;
         margin: 1rem 0;
+        border: 1px solid rgba(255, 43, 214, 0.18);
+        background: rgba(15, 15, 22, 0.85);
+        box-shadow: var(--shadow);
     }
     .quality-warning {
-        background-color: #FFF8E1;
-        border-left: 5px solid #FFC107;
+        background: linear-gradient(180deg, rgba(255, 204, 0, 0.12), rgba(15, 15, 22, 0.95));
+        border: 1px solid rgba(255, 43, 214, 0.18);
+        border-left: 5px solid var(--warning);
         padding: 1rem;
-        border-radius: 5px;
+        border-radius: 12px;
         margin: 1rem 0;
+        box-shadow: var(--shadow);
     }
     .perf-badge {
         text-align: right;
-        color: #999;
+        color: var(--muted);
         font-size: 0.85rem;
+    }
+
+    /* KPI cards (avoid Streamlit metric ellipsis) */
+    .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 8px;
+    }
+    @media (max-width: 1100px) {
+        .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    .kpi-card {
+        background: linear-gradient(180deg, rgba(255, 43, 214, 0.06), rgba(15, 15, 22, 0.92));
+        border: 1px solid rgba(255, 43, 214, 0.18);
+        border-radius: 14px;
+        padding: 14px 14px 12px;
+        box-shadow: var(--shadow);
+        min-height: 86px;
+    }
+    .kpi-title {
+        color: var(--muted);
+        font-size: 0.92rem;
+        margin: 0 0 6px 0;
+        letter-spacing: 0.2px;
+    }
+    .kpi-value {
+        color: var(--text);
+        font-size: 1.35rem;
+        font-weight: 700;
+        margin: 0;
+        line-height: 1.25;
+        overflow-wrap: anywhere; /* ensure no ... */
+        white-space: normal;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -232,7 +377,7 @@ st.markdown("""
 st.markdown('<div class="main-header">🌿 Plant Disease Detector</div>',
             unsafe_allow_html=True)
 st.markdown(
-    '<div class="sub-header">SIH Hackathon — PlantVillage Disease Classification '
+    '<div class="sub-header">PlantVillage Disease Classification '
     '| EfficientNet-B0 + Grad-CAM + Treatment Advisor</div>',
     unsafe_allow_html=True,
 )
@@ -247,264 +392,279 @@ except Exception as e:
     st.error(f"Error loading model: {e}")
     st.stop()
 
-# --- Layout: two columns ---
-col_left, col_right = st.columns([2, 1])
+if "analysis" not in st.session_state:
+    st.session_state.analysis = None
 
-with col_left:
-    st.markdown("### Upload Plant Leaf Image")
-    uploaded_file = st.file_uploader(
-        "Choose an image of a plant leaf ...",
-        type=["jpg", "jpeg", "png"],
-        help="Supported formats: JPG, JPEG, PNG",
+# ------------------------------------------------------------------
+# Professional layout: Sidebar controls + main dashboard
+# ------------------------------------------------------------------
+st.sidebar.markdown("## Control Panel")
+st.sidebar.caption("Upload a leaf image and run analysis.")
+
+uploaded_file = st.sidebar.file_uploader(
+    "Leaf image",
+    type=["jpg", "jpeg", "png"],
+    help="Use a clear, well-lit image where the leaf fills most of the frame.",
+    key="leaf_upload",
+)
+
+pil_image = None
+is_good = False
+quality_msg = ""
+quality_metrics = None
+
+if uploaded_file is not None:
+    pil_image = Image.open(uploaded_file).convert("RGB")
+    is_good, quality_msg, quality_metrics = check_image_quality(pil_image)
+
+    with st.sidebar.expander("Image quality", expanded=False):
+        if quality_metrics:
+            qm = quality_metrics
+            st.metric("Sharpness", f"{qm['blur_score']:.1f}")
+            st.metric("Brightness", f"{qm['mean_brightness']:.0f} / 255")
+            st.metric("Resolution", f"{qm['width']}×{qm['height']} px")
+        if not is_good:
+            st.warning(quality_msg)
+
+run_disabled = (uploaded_file is None) or (not is_good)
+run_clicked = st.sidebar.button(
+    "Analyze",
+    type="primary",
+    use_container_width=True,
+    disabled=run_disabled,
+)
+
+with st.sidebar.expander("Model details", expanded=False):
+    st.markdown(f"""
+    - **Classes**: {len(class_names)}
+    - **Architecture**: EfficientNet-B0
+    - **Explainability**: Grad-CAM
+    - **Confidence**: Temperature scaling (optional)
+    """)
+
+if run_clicked and pil_image is not None and is_good:
+    with st.spinner("Analyzing plant health ..."):
+        (prediction, raw_conf, cal_conf,
+         gradcam_img, heatmap, elapsed_ms) = predict_and_explain(
+            pil_image, model, class_names, scaler
+        )
+
+    severity = None
+    if "healthy" not in prediction.lower():
+        severity = estimate_severity(heatmap, pil_image)
+
+    st.session_state.analysis = {
+        "prediction": prediction,
+        "display_name": prediction.replace("___", " — ").replace("_", " "),
+        "raw_conf": raw_conf,
+        "cal_conf": cal_conf,
+        "confidence": cal_conf,
+        "gradcam_img": gradcam_img,
+        "heatmap": heatmap,
+        "elapsed_ms": elapsed_ms,
+        "severity": severity,
+        "info": get_treatment_info(prediction),
+        "is_healthy": "healthy" in prediction.lower(),
+        "pil_image": pil_image,
+    }
+
+# -----------------------------
+# Main dashboard content
+# -----------------------------
+analysis = st.session_state.analysis
+
+top = st.container()
+with top:
+    if uploaded_file is None:
+        st.markdown("### Upload an image to get started")
+        st.info(
+            "Use the **Control Panel** on the left to upload a leaf image, "
+            "then click **Analyze** to generate predictions, severity, Grad-CAM, and treatment guidance."
+        )
+    else:
+        st.markdown("### Current image")
+        st.image(pil_image, caption="Uploaded image", use_container_width=True)
+
+if analysis is None:
+    st.markdown("---")
+    st.markdown("### What you’ll get")
+    st.markdown("""
+    <div class="kpi-grid">
+        <div class="kpi-card">
+            <div class="kpi-title">Prediction</div>
+            <div class="kpi-value">39 classes</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-title">Confidence</div>
+            <div class="kpi-value">Calibrated optional</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-title">Explainability</div>
+            <div class="kpi-value">Grad CAM</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-title">Guidance</div>
+            <div class="kpi-value">Treatment and pesticide</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    st.markdown("---")
+
+    # KPI row
+    k1, k2, k3, k4 = st.columns([2, 1, 1, 1])
+    with k1:
+        st.markdown(f"### {analysis['display_name']}")
+    with k2:
+        st.metric("Confidence", f"{analysis['confidence'] * 100:.1f} %")
+    with k3:
+        if analysis["severity"] is None:
+            st.metric("Severity", "—")
+        else:
+            st.metric("Severity", analysis["severity"]["severity"])
+    with k4:
+        st.metric("Inference", f"{analysis['elapsed_ms']:.0f} ms")
+
+    if analysis["confidence"] < LOW_CONFIDENCE_THRESHOLD:
+        st.warning(
+            f"Low confidence ({analysis['confidence'] * 100:.1f} %). "
+            "Consider uploading a clearer image or consulting an expert."
+        )
+
+    tab_overview, tab_explain, tab_treat, tab_cal = st.tabs(
+        ["Overview", "Explainability", "Treatment", "Calibration"]
     )
 
-    if uploaded_file is not None:
-        # Open PIL image once (reused everywhere)
-        pil_image = Image.open(uploaded_file).convert("RGB")
+    with tab_overview:
+        cal_label = " (calibrated)" if scaler.fitted else ""
+        st.markdown(f"""
+        <div class="result-card">
+            <h4>🔬 Detection Summary</h4>
+            <p><strong>Disease:</strong> {analysis['display_name']}</p>
+            <p><strong>Confidence:</strong> {analysis['confidence'] * 100:.1f} %{cal_label}</p>
+        </div>
+        """, unsafe_allow_html=True)
+        st.progress(analysis["confidence"])
 
-        # Show the uploaded image
-        st.image(pil_image, caption="Uploaded Image", use_column_width=True)
+        if analysis["is_healthy"]:
+            st.success("Plant appears healthy.")
+        else:
+            st.warning("Disease detected. Review severity and treatment guidance.")
 
-        # ==============================================================
-        # FEATURE 1 — Image Quality Assessment
-        # ==============================================================
-        is_good, quality_msg, quality_metrics = check_image_quality(pil_image)
-
-        # Always show quality metrics in a small expander
-        with st.expander("📊 Image Quality Metrics", expanded=False):
-            qm = quality_metrics
-            q1, q2, q3 = st.columns(3)
-            q1.metric("Sharpness", f"{qm['blur_score']:.1f}",
-                       help="Laplacian variance — higher is sharper")
-            q2.metric("Brightness", f"{qm['mean_brightness']:.0f} / 255")
-            q3.metric("Resolution", f"{qm['width']}×{qm['height']} px")
-
-        if not is_good:
-            # Show warning and STOP prediction
+        if analysis["severity"] is not None:
+            sev = analysis["severity"]
+            sev_icon = (
+                '🟢' if sev['severity'] == 'Mild'
+                else '🟠' if sev['severity'] == 'Moderate'
+                else '🔴'
+            )
+            st.markdown("#### Severity")
             st.markdown(f"""
-            <div class="quality-warning">
-                <h4>⚠️ Image Quality Issue</h4>
-                <pre style="white-space: pre-wrap;">{quality_msg}</pre>
+            <div class="severity-card" style="border-left: 5px solid {sev['color']};
+                 background-color: {sev['color']}15;">
+                <h4 style="color: {sev['color']};">
+                    {sev_icon} Severity: {sev['severity']}
+                </h4>
+                <p><strong>Estimated infected area:</strong> {sev['infected_pct']} %</p>
             </div>
             """, unsafe_allow_html=True)
-            st.warning("Please upload a better-quality image before analysis.")
-            st.stop()   # ← prevents prediction from running
+            st.progress(min(sev["infected_pct"] / 100.0, 1.0))
 
-        # ==============================================================
-        # Analyse button (only reachable if image quality is OK)
-        # ==============================================================
-        if st.button("Analyze Disease", type="primary",
-                      use_container_width=True):
-            with st.spinner("Analyzing plant health ..."):
-                (prediction, raw_conf, cal_conf,
-                 gradcam_img, heatmap, elapsed_ms) = predict_and_explain(
-                    pil_image, model, class_names, scaler
-                )
+    with tab_explain:
+        st.markdown("#### Grad-CAM")
+        gc_left, gc_right = st.columns(2)
+        with gc_left:
+            st.image(analysis["pil_image"], caption="Original", use_container_width=True)
+        with gc_right:
+            st.image(analysis["gradcam_img"], caption="Grad-CAM overlay", use_container_width=True)
 
-            # ---- Performance badge ----
-            st.markdown(
-                f'<div class="perf-badge">⏱ Inference: {elapsed_ms:.0f} ms</div>',
-                unsafe_allow_html=True,
+    with tab_treat:
+        info = analysis["info"]
+        st.markdown("#### Treatment recommendation")
+        st.markdown(f"""
+        <div class="treatment-card">
+            <h4>📋 Description</h4>
+            <p>{info['description']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("**Recommended steps**")
+        for step in info["treatment"]:
+            st.markdown(f"- {step}")
+
+        st.markdown(f"""
+        <div class="pesticide-card">
+            <h4>💊 Suggested product</h4>
+            <p>{info['pesticide']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with tab_cal:
+        st.markdown("#### Confidence calibration")
+        if scaler.fitted:
+            st.success(f"Temperature loaded: T = {scaler.temperature:.4f}")
+        else:
+            st.info("No calibration file found — using raw softmax (T = 1.0).")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.metric("Raw confidence", f"{analysis['raw_conf'] * 100:.1f} %")
+        with c2:
+            st.metric("Calibrated confidence", f"{analysis['cal_conf'] * 100:.1f} %")
+
+        with st.expander("Fit temperature from local validation logits", expanded=False):
+            default_logits = os.path.join(SCRIPT_DIR, "val_logits.npy")
+            default_labels = os.path.join(SCRIPT_DIR, "val_labels.npy")
+
+            logits_path = st.text_input(
+                "Logits file path (.npy, shape Nx39)",
+                value=default_logits,
+                key="logits_path_input",
+            )
+            labels_path = st.text_input(
+                "Labels file path (.npy, shape N)",
+                value=default_labels,
+                key="labels_path_input",
             )
 
-            # ==========================================================
-            # Results section
-            # ==========================================================
-            st.markdown("---")
-            st.markdown("### Analysis Results")
+            logits_exists = os.path.exists(logits_path)
+            labels_exists = os.path.exists(labels_path)
 
-            # Use calibrated confidence as the "primary" confidence shown
-            confidence = cal_conf
-            display_name = prediction.replace("___", " — ").replace("_", " ")
-
-            # ---- Prediction + confidence card ----
-            cal_label = " (calibrated)" if scaler.fitted else ""
-            st.markdown(f"""
-            <div class="result-card">
-                <h4>🔬 Disease Detection</h4>
-                <p><strong>Disease:</strong> {display_name}</p>
-                <p><strong>Confidence:</strong> {confidence * 100:.1f} %{cal_label}</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # Confidence progress bar
-            st.progress(confidence)
-
-            # Low-confidence warning
-            if confidence < LOW_CONFIDENCE_THRESHOLD:
-                st.warning(
-                    f"⚠ Low confidence ({confidence * 100:.1f} %). "
-                    "The prediction may be unreliable — consider uploading "
-                    "a clearer image or consulting an expert."
-                )
-
-            # If temperature scaler is fitted, show both raw & calibrated
-            if scaler.fitted:
-                with st.expander("🔧 Calibration Details", expanded=False):
-                    c1, c2 = st.columns(2)
-                    c1.metric("Raw Confidence",
-                              f"{raw_conf * 100:.1f} %")
-                    c2.metric("Calibrated Confidence",
-                              f"{cal_conf * 100:.1f} %")
-                    st.caption(
-                        f"Temperature T = {scaler.temperature:.3f}  "
-                        "(learned via temperature scaling on validation set)"
-                    )
-
-            # Healthy vs diseased feedback
-            if "healthy" in prediction.lower():
-                st.success("**Plant appears Healthy!**")
-                st.balloons()
+            if logits_exists and labels_exists:
+                st.success("Found both local files. Ready to fit.")
             else:
-                st.warning("⚠ **Disease Detected** — see treatment below.")
+                missing = []
+                if not logits_exists:
+                    missing.append(f"`{logits_path}`")
+                if not labels_exists:
+                    missing.append(f"`{labels_path}`")
+                st.warning("Missing file(s): " + ", ".join(missing))
 
-            # ==========================================================
-            # FEATURE 2 — Disease Severity Estimation
-            # ==========================================================
-            if "healthy" not in prediction.lower():
-                sev = estimate_severity(heatmap, pil_image)
+            if st.button("Fit Temperature From Local Files", key="fit_temp_btn_local"):
+                if not (logits_exists and labels_exists):
+                    st.error("Cannot fit temperature: required files are missing.")
+                else:
+                    try:
+                        logits_np = np.load(logits_path)
+                        labels_np = np.load(labels_path)
+                        logits_t = torch.from_numpy(logits_np).float()
+                        labels_t = torch.from_numpy(labels_np).long()
 
-                st.markdown("### Disease Severity")
-                sev_icon = (
-                    '🟢' if sev['severity'] == 'Mild'
-                    else '🟠' if sev['severity'] == 'Moderate'
-                    else '🔴'
-                )
-                st.markdown(f"""
-                <div class="severity-card" style="border-left: 5px solid {sev['color']};
-                     background-color: {sev['color']}15;">
-                    <h4 style="color: {sev['color']};">
-                        {sev_icon} Severity: {sev['severity']}
-                    </h4>
-                    <p><strong>Estimated Infected Area:</strong> {sev['infected_pct']} %</p>
-                </div>
-                """, unsafe_allow_html=True)
-
-                # Small progress-style bar for infected area
-                st.progress(min(sev["infected_pct"] / 100.0, 1.0))
-
-            # ==========================================================
-            # Grad-CAM images (side by side)
-            # ==========================================================
-            st.markdown("### Grad-CAM Explainability")
-            gc_left, gc_right = st.columns(2)
-            with gc_left:
-                st.image(
-                    pil_image,
-                    caption="Original Image",
-                    use_column_width=True,
-                )
-            with gc_right:
-                st.image(
-                    gradcam_img,
-                    caption="Grad-CAM Heatmap Overlay",
-                    use_column_width=True,
-                )
-
-            # ==========================================================
-            # Treatment Recommendation
-            # ==========================================================
-            st.markdown("### Treatment Recommendation")
-            info = get_treatment_info(prediction)
-
-            # Description
-            st.markdown(f"""
-            <div class="treatment-card">
-                <h4>📋 Description</h4>
-                <p>{info['description']}</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # Treatment steps
-            st.markdown("**Recommended Treatment:**")
-            for step in info["treatment"]:
-                st.markdown(f"- {step}")
-
-            # Pesticide
-            st.markdown(f"""
-            <div class="pesticide-card">
-                <h4>💊 Recommended Pesticide / Product</h4>
-                <p>{info['pesticide']}</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-
-with col_right:
-    st.markdown("### How to Use")
-    st.info("""
-    1. **Upload** a clear image of a plant leaf
-    2. **Quality check** runs automatically
-    3. **Click** 'Analyze Disease'
-    4. **View** prediction, severity, Grad-CAM, and treatment
-    5. **Check** calibrated confidence level
-    """)
-
-    st.markdown("### Tips for Best Results")
-    st.success("""
-    - Use well-lit, clear images
-    - Ensure leaf fills most of the frame
-    - Avoid blurry or dark photos
-    - Multiple angles can help accuracy
-    """)
-
-    st.markdown("### Model Information")
-    st.info(f"""
-    - **Classes:** {len(class_names)} diseases
-    - **Architecture:** EfficientNet-B0
-    - **Dataset:** PlantVillage
-    - **Explainability:** Grad-CAM
-    - **Calibration:** Temperature Scaling
-    """)
-
-    st.markdown("### Features")
-    st.success("""
-    - Image quality gate (blur / brightness / resolution)
-    - Grad-CAM heatmap visualisation
-    - Disease severity estimation (Mild / Moderate / Severe)
-    - Calibrated confidence + progress bar
-    - Low-confidence warning (< 60 %)
-    - Disease treatment & pesticide advice
-    - Inference time logging
-    """)
-
-    # ------------------------------------------------------------------
-    # Sidebar: Temperature Scaling calibration utility
-    # ------------------------------------------------------------------
-    st.markdown("---")
-    st.markdown("### ⚙️ Calibration")
-
-    if scaler.fitted:
-        st.caption(f"Temperature loaded: **T = {scaler.temperature:.4f}**")
-    else:
-        st.caption("No calibration file found — using raw softmax (T = 1.0).")
-
-    with st.expander("Calibrate from validation logits", expanded=False):
-        st.markdown(
-            "Upload `val_logits.npy` (N×39) and `val_labels.npy` (N,) "
-            "saved from your validation run."
-        )
-        logits_file = st.file_uploader("val_logits.npy", type=["npy"],
-                                        key="logits_upload")
-        labels_file = st.file_uploader("val_labels.npy", type=["npy"],
-                                        key="labels_upload")
-        if logits_file and labels_file:
-            if st.button("Fit Temperature", key="fit_temp_btn"):
-                logits_np = np.load(io.BytesIO(logits_file.read()))
-                labels_np = np.load(io.BytesIO(labels_file.read()))
-                logits_t = torch.from_numpy(logits_np).float()
-                labels_t = torch.from_numpy(labels_np).long()
-
-                new_scaler = TemperatureScaler()
-                T = new_scaler.fit(logits_t, labels_t)
-                new_scaler.save(TEMP_SCALE_PATH)
-                st.success(f"Temperature fitted! T = {T:.4f} — saved to "
-                           f"`{TEMP_SCALE_PATH}`. Reload the page to use it.")
+                        new_scaler = TemperatureScaler()
+                        T = new_scaler.fit(logits_t, labels_t)
+                        new_scaler.save(TEMP_SCALE_PATH)
+                        st.success(
+                            f"Temperature fitted! T = {T:.4f} — saved to `{TEMP_SCALE_PATH}`. "
+                            "Reload the page to use it."
+                        )
+                    except Exception as e:
+                        st.error(f"Calibration failed: {e}")
 
 # --- Footer ---
 st.markdown("---")
 st.markdown("""
-<div style="text-align: center; color: #666;">
-    <p>🌱 <strong>SIH Hackathon Project</strong></p>
+<div style="text-align: center; color: #b9b9d6;">
+    <p>🌱 <strong>Plant Disease Detection Project</strong></p>
     <p>Plant Disease Detection using Deep Learning — EfficientNet-B0 + Grad-CAM</p>
 </div>
 """, unsafe_allow_html=True)
