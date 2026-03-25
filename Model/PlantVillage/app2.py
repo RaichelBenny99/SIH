@@ -188,7 +188,7 @@ def predict_disease(image_data, model, class_names):
 
 # Configure the page
 st.set_page_config(
-    page_title="🌿 Plant Disease Detector - SIH",
+    page_title="🌿 Plant Disease Detector",
     page_icon="🌱",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -223,7 +223,7 @@ st.markdown("""
 
 # Header
 st.markdown('<div class="main-header">🌿 Plant Disease Detector</div>', unsafe_allow_html=True)
-st.markdown('<div style="text-align: center; color: #666; margin-bottom: 2rem;">SIH Hackathon Project - PlantVillage Disease Classification</div>', unsafe_allow_html=True)
+st.markdown('<div style="text-align: center; color: #666; margin-bottom: 2rem;">PlantVillage Disease Classification</div>', unsafe_allow_html=True)
 
 # Load model and class names
 try:
@@ -304,7 +304,7 @@ with col2:
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #666;">
-    <p>🌱 <strong>SIH Hackathon Project</strong></p>
+    <p>🌱 <strong>Plant Disease Detection Project</strong></p>
     <p>Plant Disease Detection using Deep Learning</p>
 </div>
 """, unsafe_allow_html=True)

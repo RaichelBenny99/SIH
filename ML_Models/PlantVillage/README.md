@@ -1,7 +1,7 @@
-# 🌿 PlantVillage Disease Detection - SIH Hackathon
+# 🌿 PlantVillage Disease Detection
 
 ## Overview
-Plant disease detection system using EfficientNet-B0 trained on PlantVillage dataset for SIH hackathon.
+Plant disease detection system using EfficientNet-B0 trained on PlantVillage dataset.
 
 ## Features
 - 🌱 39 plant disease classifications
@@ -50,4 +50,4 @@ streamlit run streamlit_app.py
 4. Check confidence score
 
 ## Team
-[Add your SIH team information here]
+[Add your team information here]
