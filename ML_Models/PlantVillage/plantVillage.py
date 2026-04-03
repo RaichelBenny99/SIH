@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, models, transforms
 import os
 import time
@@ -40,26 +40,29 @@ val_transform = transforms.Compose([
 ])
 
 print("Loading dataset...")
-# Load the dataset using ImageFolder
-full_dataset = datasets.ImageFolder(DATA_DIR, transform=train_transform)
+# Load dataset twice so each split gets the correct transform without
+# the shared-object bug (random_split Subsets share the same .dataset).
+train_full = datasets.ImageFolder(DATA_DIR, transform=train_transform)
+val_full   = datasets.ImageFolder(DATA_DIR, transform=val_transform)
 
 # Get class names
-class_names = full_dataset.classes
+class_names = train_full.classes
 num_classes = len(class_names)
 print(f"Found {num_classes} classes.")
 
-# Split dataset into training and validation (80/20 split)
-train_size = int(0.8 * len(full_dataset))
-val_size = len(full_dataset) - train_size
-train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
-
-# IMPORTANT: Apply the correct transform to each split
-train_dataset.dataset.transform = train_transform
-val_dataset.dataset.transform = val_transform
+# Split 80/20 with a fixed seed so export_logits.py can reproduce
+# the exact same validation split for temperature-scaling calibration.
+total = len(train_full)
+train_size = int(0.8 * total)
+val_size = total - train_size
+generator = torch.Generator().manual_seed(42)
+all_indices = torch.randperm(total, generator=generator).tolist()
+train_dataset = Subset(train_full, all_indices[:train_size])
+val_dataset   = Subset(val_full,   all_indices[train_size:])
 
 # Create DataLoaders
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
-val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4)
+val_loader   = DataLoader(val_dataset,   batch_size=BATCH_SIZE, shuffle=False, num_workers=4)
 print("Data preparation complete.")
 
 # --- 4. MODEL DEFINITION (TRANSFER LEARNING) ---

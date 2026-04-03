@@ -601,6 +601,10 @@ else:
 
     with tab_cal:
         st.markdown("#### Confidence calibration")
+        # Show any pending success message carried over from a calibration rerun
+        _cal_msg = st.session_state.pop("_cal_success", None)
+        if _cal_msg:
+            st.success(_cal_msg)
         if scaler.fitted:
             st.success(f"Temperature loaded: T = {scaler.temperature:.4f}")
         else:
@@ -653,10 +657,29 @@ else:
                         new_scaler = TemperatureScaler()
                         T = new_scaler.fit(logits_t, labels_t)
                         new_scaler.save(TEMP_SCALE_PATH)
-                        st.success(
-                            f"Temperature fitted! T = {T:.4f} — saved to `{TEMP_SCALE_PATH}`. "
-                            "Reload the page to use it."
+
+                        # Update the live scaler so the change takes effect
+                        # immediately without reloading the page
+                        scaler.temperature = new_scaler.temperature
+                        scaler.fitted = True
+                        load_temperature_scaler.clear()
+
+                        # Recalculate calibrated confidence for current image
+                        with torch.no_grad():
+                            image_tensor = TRANSFORM(analysis["pil_image"]).unsqueeze(0)
+                            outputs = model(image_tensor)
+                            cal_probs = scaler.calibrated_softmax(outputs[0])
+                            pred_idx = outputs.argmax(dim=1).item()
+                            analysis["cal_conf"] = cal_probs[pred_idx].item()
+                            analysis["confidence"] = analysis["cal_conf"]
+
+                        # Store message in session state so it survives the rerun
+                        # (st.success() placed before st.rerun() is never rendered)
+                        st.session_state["_cal_success"] = (
+                            f"✅ Temperature fitted!  T = {T:.4f} — "
+                            f"calibrated confidence: {analysis['cal_conf'] * 100:.1f} %"
                         )
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Calibration failed: {e}")
 
