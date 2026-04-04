@@ -27,7 +27,13 @@ from gradcam import generate_gradcam, overlay_heatmap
 from treatment_info import get_treatment_info
 from image_quality import check_image_quality
 from severity_estimator import estimate_severity
-from temperature_scaling import TemperatureScaler
+from temperature_scaling import TemperatureScaler, compute_ece, plot_reliability_comparison
+
+# NEW modular services
+from services.treatment import get_treatment
+from services.weather import get_weather
+from services.severity import estimate_severity as estimate_severity_confidence
+from services.gemini import ask_agronomist
 
 # =====================================================================
 # CONFIGURATION
@@ -131,6 +137,9 @@ def predict_and_explain(pil_image, model, class_names, scaler):
     gradcam_img      : PIL.Image    — heatmap overlay
     gradcam_heatmap  : numpy array  — raw (224,224) heatmap for severity
     elapsed_ms       : float        — inference time in milliseconds
+    status           : str          — "ok" or "unknown" for OOD detection
+    ood_message      : str|None     — message for OOD cases
+    raw_entropy      : float        — entropy of raw softmax distribution
     """
     t0 = time.perf_counter()
 
@@ -146,6 +155,13 @@ def predict_and_explain(pil_image, model, class_names, scaler):
     prediction = class_names[pred_idx]
     raw_confidence = raw_probs[pred_idx].item()
 
+    # Entropy-based OOD heuristics
+    eps = 1e-12
+    raw_entropy = -torch.sum(raw_probs * torch.log(raw_probs + eps)).item()
+    OOD_CONF_THRESHOLD = 0.55
+    OOD_ENTROPY_THRESHOLD = 1.8
+    is_ood = (raw_confidence < OOD_CONF_THRESHOLD) or (raw_entropy > OOD_ENTROPY_THRESHOLD)
+
     # --- Calibrated confidence ---
     cal_probs = scaler.calibrated_softmax(outputs[0])  # (39,)
     cal_confidence = cal_probs[pred_idx].item()
@@ -156,7 +172,20 @@ def predict_and_explain(pil_image, model, class_names, scaler):
 
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
-    return prediction, raw_confidence, cal_confidence, gradcam_img, heatmap, elapsed_ms
+    status = "unknown" if is_ood else "ok"
+    ood_message = "Image is not a recognizable plant leaf" if is_ood else None
+
+    return (
+        prediction,
+        raw_confidence,
+        cal_confidence,
+        gradcam_img,
+        heatmap,
+        elapsed_ms,
+        status,
+        ood_message,
+        raw_entropy,
+    )
 
 
 # =====================================================================
@@ -445,13 +474,26 @@ with st.sidebar.expander("Model details", expanded=False):
 if run_clicked and pil_image is not None and is_good:
     with st.spinner("Analyzing plant health ..."):
         (prediction, raw_conf, cal_conf,
-         gradcam_img, heatmap, elapsed_ms) = predict_and_explain(
+         gradcam_img, heatmap, elapsed_ms,
+         status, ood_message, raw_entropy) = predict_and_explain(
             pil_image, model, class_names, scaler
         )
 
     severity = None
-    if "healthy" not in prediction.lower():
-        severity = estimate_severity(heatmap, pil_image)
+    if status != "unknown":
+        if "healthy" not in prediction.lower():
+            severity = estimate_severity(heatmap, pil_image)
+        else:
+            # Use the modular severity-from-confidence function
+            sev_from_conf = estimate_severity_confidence(cal_conf)
+            # Convert to match the original format
+            severity = {
+                "severity": sev_from_conf["severity_label"],
+                "infected_pct": sev_from_conf["severity_score"],
+                "color": "#4CAF50" if sev_from_conf["severity_label"] == "Low" else (
+                    "#FF9800" if sev_from_conf["severity_label"] == "Medium" else "#F44336"
+                )
+            }
 
     st.session_state.analysis = {
         "prediction": prediction,
@@ -462,7 +504,11 @@ if run_clicked and pil_image is not None and is_good:
         "gradcam_img": gradcam_img,
         "heatmap": heatmap,
         "elapsed_ms": elapsed_ms,
+        "status": status,
+        "ood_message": ood_message,
+        "raw_entropy": raw_entropy,
         "severity": severity,
+        "treatment": get_treatment(prediction) if status != "unknown" else None,
         "info": get_treatment_info(prediction),
         "is_healthy": "healthy" in prediction.lower(),
         "pil_image": pil_image,
@@ -525,14 +571,16 @@ else:
     with k4:
         st.metric("Inference", f"{analysis['elapsed_ms']:.0f} ms")
 
-    if analysis["confidence"] < LOW_CONFIDENCE_THRESHOLD:
+    if analysis["status"] == "unknown":
+        st.warning(f"OOD detected: {analysis['ood_message']}")
+    elif analysis["confidence"] < LOW_CONFIDENCE_THRESHOLD:
         st.warning(
             f"Low confidence ({analysis['confidence'] * 100:.1f} %). "
             "Consider uploading a clearer image or consulting an expert."
         )
 
-    tab_overview, tab_explain, tab_treat, tab_cal = st.tabs(
-        ["Overview", "Explainability", "Treatment", "Calibration"]
+    tab_overview, tab_explain, tab_treat, tab_gemini, tab_cal = st.tabs(
+        ["Overview", "Explainability", "Treatment", "🤖 Agronomist", "Calibration"]
     )
 
     with tab_overview:
@@ -579,25 +627,130 @@ else:
             st.image(analysis["gradcam_img"], caption="Grad-CAM overlay", use_container_width=True)
 
     with tab_treat:
-        info = analysis["info"]
-        st.markdown("#### Treatment recommendation")
-        st.markdown(f"""
-        <div class="treatment-card">
-            <h4>📋 Description</h4>
-            <p>{info['description']}</p>
-        </div>
-        """, unsafe_allow_html=True)
+        if analysis.get("status") == "unknown":
+            st.warning("Unknown condition detected; treatment recommendation is not available.")
+        else:
+            treatment = analysis.get("treatment") or get_treatment(analysis.get("prediction", ""))
+            st.markdown("#### Treatment recommendation")
+            st.markdown(f"""
+            <div class="treatment-card">
+                <h4>📋 Source guidance</h4>
+                <p>Uses domain mapping and prior disease treatment heuristics.</p>
+            </div>
+            """, unsafe_allow_html=True)
 
-        st.markdown("**Recommended steps**")
-        for step in info["treatment"]:
-            st.markdown(f"- {step}")
+            st.markdown("**Organic treatment**")
+            for item in treatment.get("organic", []):
+                st.markdown(f"- {item}")
 
-        st.markdown(f"""
-        <div class="pesticide-card">
-            <h4>💊 Suggested product</h4>
-            <p>{info['pesticide']}</p>
-        </div>
-        """, unsafe_allow_html=True)
+            st.markdown("**Chemical treatment**")
+            for item in treatment.get("chemical", []):
+                st.markdown(f"- {item}")
+
+            st.markdown("**Cultural practices**")
+            for item in treatment.get("cultural", []):
+                st.markdown(f"- {item}")
+
+            info = analysis.get("info")
+            if info:
+                st.markdown(f"""
+                <div class="pesticide-card">
+                    <h4>💊 Suggested product</h4>
+                    <p>{info['pesticide']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+    with tab_gemini:
+        st.markdown("#### 🤖 Smart Agronomist Assistant")
+        st.caption("Ask an AI-powered agronomist for expert advice based on disease, severity, and weather conditions.")
+
+        if analysis.get("status") == "unknown":
+            st.warning("Cannot consult agronomist: image not recognized as a plant leaf.")
+        else:
+            st.markdown("**Current analysis:**")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric("Disease", analysis["display_name"])
+            with c2:
+                sev_label = analysis["severity"]["severity"] if analysis["severity"] else "—"
+                st.metric("Severity", sev_label)
+            with c3:
+                st.metric("Confidence", f"{analysis['confidence']*100:.1f}%")
+
+            st.markdown("---")
+            st.markdown("**Your location (for weather context):**")
+            loc_col1, loc_col2 = st.columns(2)
+            with loc_col1:
+                lat = st.number_input("Latitude", value=28.7041, step=0.001, key="gemini_lat")
+            with loc_col2:
+                lon = st.number_input("Longitude", value=77.1025, step=0.001, key="gemini_lon")
+
+            st.markdown("**Your question:**")
+            user_question = st.text_area(
+                "Ask the agronomist your question...",
+                value="What's the best treatment for this disease?",
+                height=100,
+                key="gemini_question"
+            )
+
+            if st.button("🚀 Ask Agronomist", type="primary", use_container_width=True, key="gemini_ask"):
+                with st.spinner("Consulting with Gemini AI..."):
+                    try:
+                        # Fetch weather, but proceed with fallback if it fails
+                        weather_data = None
+                        try:
+                            weather_data = get_weather(lat, lon)
+                        except Exception as we:
+                            st.warning(f"⚠️ Weather data unavailable: {str(we)[:80]}")
+                            weather_data = {
+                                "temperature": 25.0,
+                                "humidity": 60.0,
+                                "risk": "Unknown"
+                            }
+
+                        severity_obj = analysis["severity"] if analysis["severity"] else {"severity": "Unknown", "infected_pct": 0}
+                        response = ask_agronomist(
+                            disease=analysis["prediction"],
+                            severity=severity_obj,
+                            weather=weather_data,
+                            user_question=user_question
+                        )
+
+                        st.markdown("---")
+                        st.markdown("#### 🎯 Agronomist Response")
+
+                        col_weather, col_severity = st.columns(2)
+                        with col_weather:
+                            st.markdown(f"""
+                            <div class="result-card">
+                                <h4>🌡️ Location Weather</h4>
+                                <p><strong>Temperature:</strong> {weather_data['temperature']:.1f}°C</p>
+                                <p><strong>Humidity:</strong> {weather_data['humidity']:.0f}%</p>
+                                <p><strong>Risk Level:</strong> <strong>{weather_data['risk']}</strong></p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        with col_severity:
+                            st.markdown(f"""
+                            <div class="result-card">
+                                <h4>📊 Disease Profile</h4>
+                                <p><strong>Disease:</strong> {analysis['display_name']}</p>
+                                <p><strong>Severity:</strong> {severity_obj.get('severity', 'Unknown')}</p>
+                                <p><strong>Confidence:</strong> {analysis['confidence']*100:.1f}%</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        st.markdown(f"""
+                        <div class="treatment-card">
+                            <h4>💡 Expert Advice</h4>
+                            <p>{response['response']}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    except ValueError as e:
+                        st.error(f"Configuration error: {e}")
+                    except Exception as e:
+                        st.error(f"Error consulting agronomist: {e}")
+                        st.caption("Ensure GEMINI_API_KEY is set in .env file.")
 
     with tab_cal:
         st.markdown("#### Confidence calibration")
@@ -682,6 +835,57 @@ else:
                         st.rerun()
                     except Exception as e:
                         st.error(f"Calibration failed: {e}")
+
+        # ── Reliability Diagram & ECE (validation-set calibration) ────
+        st.markdown("---")
+        st.markdown("#### Reliability Diagram & ECE")
+        st.caption(
+            "Dataset-level calibration quality computed from the saved "
+            "validation logits (`val_logits.npy` / `val_labels.npy`)."
+        )
+
+        _rel_logits = os.path.join(SCRIPT_DIR, "val_logits.npy")
+        _rel_labels = os.path.join(SCRIPT_DIR, "val_labels.npy")
+
+        if os.path.exists(_rel_logits) and os.path.exists(_rel_labels):
+            _logits_np = np.load(_rel_logits)
+            _labels_np = np.load(_rel_labels)
+
+            # Before: raw softmax (T = 1.0)
+            _raw_probs = torch.softmax(
+                torch.from_numpy(_logits_np).float(), dim=-1
+            ).numpy()
+
+            # After: temperature-scaled softmax
+            _T = scaler.temperature if scaler.fitted else 1.0
+            _cal_probs = scaler.calibrated_softmax(
+                torch.from_numpy(_logits_np).float()
+            ).numpy()
+
+            _ece_before = compute_ece(_raw_probs, _labels_np)
+            _ece_after  = compute_ece(_cal_probs,  _labels_np)
+
+            e1, e2, e3 = st.columns(3)
+            e1.metric("ECE — before scaling",
+                      f"{_ece_before * 100:.2f} %")
+            e2.metric("ECE — after scaling",
+                      f"{_ece_after * 100:.2f} %",
+                      delta=f"{(_ece_after - _ece_before) * 100:.2f} %",
+                      delta_color="inverse")
+            e3.metric("Temperature T",
+                      f"{_T:.4f}" if scaler.fitted else "1.0000 (uncal.)")
+
+            _fig = plot_reliability_comparison(
+                _raw_probs, _cal_probs, _labels_np,
+                T=_T if scaler.fitted else None,
+            )
+            if _fig is not None:
+                st.pyplot(_fig, use_container_width=True)
+        else:
+            st.info(
+                "Validation logits not found. Run `export_logits.py` once "
+                "to generate `val_logits.npy` and `val_labels.npy`."
+            )
 
 # --- Footer ---
 st.markdown("---")
